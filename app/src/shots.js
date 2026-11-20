@@ -1,11 +1,15 @@
 // Fixed scenes for screenshots. `window.__shotReady` is set once painted.
+// One demo state for ALL FOUR screenshots (same caption, same three photos,
+// same arrangement): caption SUNSET HEIST, kicker PALM COAST, Straddle, Vice,
+// hero = boulevard sunset, lower panels = pier + sunset beach.
 // ?shot=cover  — the exported cover alone, full-bleed (screenshot 1).
-// ?shot=editor — the editor with a real photo loaded (screenshot 2).
-// ?shot=crop   — a panel selected (outline + zoom slider) plus the same cover
-//                in all three sizes as a strip beside it (screenshot 3).
-// ?shot=range  — four exported covers in a 2x2 grid, four layouts/grades
-//                (screenshot 4).
-import { renderCover, RATIOS, makeDemoPhoto } from './render.js';
+// ?shot=editor — the editor with real photos loaded (screenshot 2).
+// ?shot=crop   — a panel selected (outline + drag handles + cursor + the zoom
+//                control near the canvas) plus the same cover in all three
+//                sizes as a strip beside it (screenshot 3).
+// ?shot=range  — four exported covers in a 2x2 grid, four layouts/grades,
+//                same photos + caption (screenshot 4).
+import { renderCover, RATIOS } from './render.js';
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
@@ -20,21 +24,65 @@ function ready() {
   requestAnimationFrame(() => requestAnimationFrame(() => { window.__shotReady = true; }));
 }
 
-async function samplePhoto(api, name) {
-  const img = await loadImage(`samples/${name}.jpg`);
-  const bmp = await createImageBitmap(img);
-  return { img: bmp, name, demo: false };
+// The three shipped sample photos, in panel order: hero, lower-left, lower-right.
+async function loadSamples() {
+  const out = [];
+  for (const name of ['boulevard', 'pier', 'sunset']) {
+    const img = await loadImage(`samples/${name}.jpg`);
+    const bmp = await createImageBitmap(img);
+    out.push({ img: bmp, name, demo: false });
+  }
+  return out;
+}
+
+// Panel assignment for a layout, from the three samples. Straddle uses the
+// tuned pans (boulevard hero so her face stays in frame; pier so his face
+// clears the caption straddling the gutter). Band is one full-bleed panel:
+// the boulevard photo is panned down so her face shows above the black band.
+function panelsFor(layout, photos) {
+  const [b, p, s] = photos;
+  if (layout === 'band') return [{ photoIndex: 0, scale: 1, ox: 0, oy: 700 }];
+  if (layout === 'quad') {
+    return [
+      { photoIndex: 0, scale: 1, ox: 0, oy: 0 },
+      { photoIndex: 1, scale: 1, ox: 0, oy: 0 },
+      { photoIndex: 2, scale: 1, ox: 0, oy: 0 },
+      { photoIndex: 0, scale: 1, ox: 0, oy: 0 },
+    ];
+  }
+  return [
+    { photoIndex: 0, scale: 1, ox: 0, oy: layout === 'straddle' ? 170 : 0 },
+    { photoIndex: 1, scale: 1, ox: 0, oy: layout === 'straddle' ? 70 : 0 },
+    { photoIndex: 2, scale: 1, ox: 0, oy: 0 },
+  ];
+}
+
+// Apply the single demo state to the editor: same caption, kicker, photos,
+// arrangement for every shot.
+function applyDemoState(api, photos, { layout = 'straddle', preset = 'vice', ratio = '1:1', caption = 'SUNSET HEIST', kicker = 'PALM COAST' } = {}) {
+  const { state } = api;
+  state.caption = caption;
+  state.kicker = kicker;
+  state.micro = 'A COVER MADE WITH SUNSET COVER MAKER';
+  state.preset = preset;
+  state.layout = layout;
+  state.ratio = ratio;
+  document.getElementById('caption').value = caption;
+  document.getElementById('kicker').value = kicker;
+  document.getElementById('micro').value = 'A COVER MADE WITH SUNSET COVER MAKER';
+  document.querySelectorAll('#ratioSeg button').forEach((b) => b.classList.toggle('on', b.dataset.ratio === ratio));
+  document.querySelectorAll('#layoutRow button').forEach((b) => b.classList.toggle('on', b.dataset.layout === layout));
+  document.querySelectorAll('#gradeRow button').forEach((b) => b.classList.toggle('on', b.dataset.preset === preset));
+  state.photos = photos;
+  state.panels = panelsFor(layout, photos);
+  while (state.panels.length < 4) state.panels.push({ photoIndex: -1, scale: 1, ox: 0, oy: 0 });
+  state.selected = 0;
 }
 
 export async function runShot(shot, query, api) {
   const { state } = api;
-  const photoName = query.get('photo') ?? 'pier';
   const caption = query.get('caption') ?? 'Sunset Heist';
-  const kicker = query.get('kicker') ?? 'Vice City';
-  const micro = query.get('micro') ?? 'A cover made with Sunset Cover Maker';
-  const preset = query.get('preset') ?? 'vice';
-  const layout = query.get('layout') ?? 'straddle';
-  const ratio = query.get('ratio') ?? '1:1';
+  const kicker = query.get('kicker') ?? 'Palm Coast';
 
   // Fonts first: a cover exported before the display fonts load is wrong.
   await Promise.all([
@@ -45,15 +93,6 @@ export async function runShot(shot, query, api) {
   ]);
   await document.fonts.ready;
 
-  state.caption = caption; state.kicker = kicker; state.micro = micro;
-  state.preset = preset; state.layout = layout; state.ratio = ratio;
-  document.getElementById('caption').value = caption;
-  document.getElementById('kicker').value = kicker;
-  document.getElementById('micro').value = micro;
-  document.querySelectorAll('#ratioSeg button').forEach((b) => b.classList.toggle('on', b.dataset.ratio === ratio));
-  document.querySelectorAll('#layoutRow button').forEach((b) => b.classList.toggle('on', b.dataset.layout === layout));
-  document.querySelectorAll('#gradeRow button').forEach((b) => b.classList.toggle('on', b.dataset.preset === preset));
-
   if (shot === 'range') {
     document.body.classList.add('shot-range');
     const stage = document.getElementById('stage');
@@ -61,19 +100,21 @@ export async function runShot(shot, query, api) {
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:center;justify-items:center;width:100%;max-width:1180px;';
     const combos = [
-      { layout: 'straddle', preset: 'vice', caption: 'SUNSET HEIST', ratio: '1:1' },
-      { layout: 'triptych', preset: 'neon', caption: 'NEON NIGHTS', ratio: '4:5' },
-      { layout: 'band', preset: 'heat', caption: 'HEAT WAVE', ratio: '16:9' },
-      { layout: 'quad', preset: 'mint', caption: 'MINT DUSK', ratio: '1:1' },
+      { layout: 'straddle', preset: 'vice', ratio: '1:1' },
+      { layout: 'triptych', preset: 'neon', ratio: '4:5' },
+      { layout: 'band', preset: 'heat', ratio: '16:9' },
+      { layout: 'quad', preset: 'mint', ratio: '1:1' },
     ];
-    const ph = await samplePhoto(api, photoName);
-    const ph2 = await samplePhoto(api, photoName === 'pier' ? 'boulevard' : 'pier');
+    const photos = await loadSamples();
     for (const c of combos) {
+      const panels = panelsFor(c.layout, photos).map((p) => ({
+        photo: photos[p.photoIndex] ? photos[p.photoIndex].img : null,
+        scale: p.scale, ox: p.ox, oy: p.oy,
+      }));
       const rs = {
         ratio: c.ratio, layout: c.layout, preset: c.preset,
-        caption: c.caption, kicker: 'VICE CITY', micro: 'A COVER MADE WITH SUNSET COVER MAKER',
-        fontMode: 'auto',
-        panels: [0, 1, 2, 3].map((i) => ({ photo: (i % 2 ? ph2 : ph).img, scale: 1, ox: 0, oy: 0 })),
+        caption, kicker, micro: 'A COVER MADE WITH SUNSET COVER MAKER',
+        fontMode: 'auto', panels,
       };
       const full = renderCover(rs, c.ratio);
       // Fixed height per thumbnail so the 2x2 grid is uniform and fits the viewport.
@@ -90,32 +131,22 @@ export async function runShot(shot, query, api) {
     return;
   }
 
-  // cover / editor / crop: load the sample photo into every panel.
-  api.demoState();
-  const ph = await samplePhoto(api, photoName);
-  const ph2 = await samplePhoto(api, photoName === 'pier' ? 'boulevard' : 'pier');
+  // cover / editor / crop: the single demo state, three real photos.
+  const photos = await loadSamples();
+  applyDemoState(api, photos, { caption: caption.toUpperCase(), kicker: kicker.toUpperCase() });
+  api.redraw();
+
   if (shot === 'cover') {
-    // Three distinct panels: boulevard sunset (hero), pier, demo skyline — a real
-    // multi-panel poster, not one photo cropped three ways.
-    state.photos = [ph2, ph, { img: makeDemoPhoto(1), name: 'demo-skyline', demo: true }];
-    state.panels.forEach((p, i) => { p.photoIndex = i % 3; p.scale = 1; p.ox = 0; p.oy = 0; });
-    // Pan the boulevard hero so her face stays in frame; pan the pier photo
-    // down so his face clears the caption straddling the gutter.
-    state.panels[0].oy = 170;
-    state.panels[1].oy = 70;
-    api.redraw();
     document.body.classList.add('shot-cover');
     ready();
     return;
   }
-  state.photos = [ph];
-  state.panels.forEach((p) => { p.photoIndex = 0; p.scale = 1; p.ox = 0; p.oy = 0; });
-  api.redraw();
 
   if (shot === 'crop') {
     document.body.classList.add('shot-crop');
     api.setSelected(0);
     state.showSelection = true;
+    state.showCursor = true;
     api.redraw();
     // Bring the zoom slider + reset into view (the controls column scrolls).
     document.getElementById('cropBox').scrollIntoView({ block: 'nearest' });

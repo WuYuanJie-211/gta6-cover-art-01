@@ -11,11 +11,18 @@ export const RATIOS = {
 };
 
 export const PRESETS = {
-  vice: { name: 'Vice sunset', stops: [[0, '#ff7a2f'], [0.5, '#ff3d6e'], [1, '#2a0b3d']], contrast: 1.16, typeShadow: 'rgba(0,0,0,0.55)' },
-  neon: { name: 'Neon night', stops: [[0, '#00e5ff'], [0.55, '#ff2fd0'], [1, '#1b0b2e']], contrast: 1.24, typeShadow: 'rgba(255,47,208,0.5)' },
-  heat: { name: 'Heat', stops: [[0, '#ffb02e'], [0.55, '#ff5a1e'], [1, '#7a0f1e']], contrast: 1.16, typeShadow: 'rgba(0,0,0,0.55)' },
-  mint: { name: 'Mint dusk', stops: [[0, '#8ef0c8'], [0.55, '#3ec6a7'], [1, '#1b2a4a']], contrast: 1.16, typeShadow: 'rgba(0,0,0,0.55)' },
+  // dark: the shadow-lift multiply alpha (dark violet). Mint's is lower and its
+  // dark stop lighter, so an already-dark photo does not crush to black.
+  vice: { name: 'Vice sunset', stops: [[0, '#ff7a2f'], [0.5, '#ff3d6e'], [1, '#2a0b3d']], contrast: 1.16, dark: 0.07, typeShadow: 'rgba(0,0,0,0.55)' },
+  neon: { name: 'Neon night', stops: [[0, '#00e5ff'], [0.55, '#ff2fd0'], [1, '#1b0b2e']], contrast: 1.24, dark: 0.07, typeShadow: 'rgba(255,47,208,0.5)' },
+  heat: { name: 'Heat', stops: [[0, '#ffb02e'], [0.55, '#ff5a1e'], [1, '#7a0f1e']], contrast: 1.16, dark: 0.07, typeShadow: 'rgba(0,0,0,0.55)' },
+  mint: { name: 'Mint dusk', stops: [[0, '#8ef0c8'], [0.55, '#3ec6a7'], [1, '#2e4a72']], contrast: 1.16, dark: 0.04, typeShadow: 'rgba(0,0,0,0.55)' },
 };
+
+// Sunset gradient strength (soft-light alpha). 0.65 is Superbot's original
+// value; the whole-canvas unification below is stronger now, so 0.65 is
+// enough for a bright daylight photo to read as sunset.
+const SUNSET_ALPHA = 0.65;
 
 export const LAYOUTS = {
   straddle: { name: 'Straddle', best: '1:1' },
@@ -111,6 +118,13 @@ function captionSpec(layout, W, H, rects, font) {
 }
 
 // Draw one photo into its panel, cover-fit, with pan/zoom, then the per-photo grade.
+// Unification, in order, so a noon-daylight panel and a golden-hour panel read
+// as one sunset poster: (1) sepia in the filter warms the photo while keeping
+// whites white; (2) a warm soft-light pass warms the midtones (soft-light
+// leaves highlights alone, so the white point survives); (3) the sunset
+// gradient, soft-light; (4) a light shadow-lift multiply, per preset (Mint's
+// is the lightest); (5) a sun push, screen; (6) a shared white-point lift,
+// screen white, that puts the top end back to white after the multiply.
 function drawPanel(ctx, rect, panel, preset) {
   ctx.save();
   ctx.beginPath();
@@ -124,26 +138,42 @@ function drawPanel(ctx, rect, panel, preset) {
     const dw = pw * s, dh = ph * s;
     const dx = rect.x + (rect.w - dw) / 2 + (panel.ox || 0);
     const dy = rect.y + (rect.h - dh) / 2 + (panel.oy || 0);
-    ctx.filter = `saturate(1.22) contrast(${preset.contrast}) brightness(0.97)`;
+    ctx.filter = `saturate(1.25) contrast(${preset.contrast}) brightness(0.98) sepia(0.35)`;
     ctx.drawImage(photo, dx, dy, dw, dh);
     ctx.filter = 'none';
   } else {
     ctx.fillStyle = '#241a2e';
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   }
+  // Warm soft-light: amber over the whole panel. Soft-light warms midtones
+  // and leaves highlights alone, so a white vest stays white.
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.globalAlpha = 0.30;
+  ctx.fillStyle = 'rgb(255,175,95)';
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  // Warm overlay: amber that also reaches the highlights, so a bright blue
+  // sky warms instead of staying noon-blue. Overlay screens lights and
+  // multiplies darks, so whites stay white.
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = 0.25;
+  ctx.fillStyle = 'rgb(255,175,95)';
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
   // Sunset gradient, soft-light — per photo, top to bottom of the panel.
-  // 0.75 (plan said 0.65) so a bright daylight photo still reads as sunset.
   const grad = ctx.createLinearGradient(0, rect.y, 0, rect.y + rect.h);
   for (const [o, c] of preset.stops) grad.addColorStop(o, c);
   ctx.globalCompositeOperation = 'soft-light';
-  ctx.globalAlpha = 0.75;
+  ctx.globalAlpha = SUNSET_ALPHA;
   ctx.fillStyle = grad;
   ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
-  // Shadow lift: dark violet multiply, 0.12.
+  // Shadow lift: dark violet multiply, per preset (Mint's is the lightest).
   ctx.globalCompositeOperation = 'multiply';
-  ctx.globalAlpha = 0.12;
+  ctx.globalAlpha = preset.dark;
   ctx.fillStyle = 'rgb(24,6,30)';
   ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   ctx.globalAlpha = 1;
@@ -158,6 +188,14 @@ function drawPanel(ctx, rect, panel, preset) {
   ctx.globalCompositeOperation = 'screen';
   ctx.globalAlpha = 0.18;
   ctx.fillStyle = sun;
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  // White-point clamp (shared): a light screen of white puts the top end
+  // back to white after the multiply, so a white vest reads as white, not grey.
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = 0.06;
+  ctx.fillStyle = 'rgb(255,255,255)';
   ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
@@ -210,6 +248,7 @@ function fitText(ctx, text, font, startSize, maxW, maxLines) {
 function drawType(ctx, state, W, H, rects) {
   const preset = PRESETS[state.preset] || PRESETS.vice;
   const u = W / 1080;
+  const m = 26 * u;
   const oneWord = state.caption.trim().split(/\s+/).length === 1;
   // Caption face: auto picks Archivo Black for one-word titles, Anton otherwise;
   // the editor's checkbox can force Archivo Black.
@@ -273,12 +312,37 @@ function drawType(ctx, state, W, H, rects) {
   fit.lines.forEach((line, i) => {
     ctx.fillText(line, spec.x, cy + lineH * i + lineH / 2);
   });
-  // Micro line under the caption.
+  // Micro line under the caption. Auto-shrinks to fit the canvas width so it
+  // never clips mid-word, and gets the same backing treatment as the caption
+  // (dark scrim band + outline) so it reads on any photo.
   if (state.micro && state.micro.trim()) {
-    ctx.font = `500 ${18 * u}px Manrope`;
+    const microText = state.micro.trim().toUpperCase();
+    const maxMicroW = W - 2 * m;
+    let mSize = 18 * u;
     ctx.letterSpacing = '0.18em';
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.fillText(state.micro.trim().toUpperCase(), kx, cy + totalH + 22 * u);
+    for (;;) {
+      ctx.font = `500 ${mSize}px Manrope`;
+      if (ctx.measureText(microText).width <= maxMicroW || mSize <= 12 * u) break;
+      mSize -= 1;
+    }
+    const my = cy + totalH + 22 * u;
+    const mw = ctx.measureText(microText).width;
+    const mx = spec.align === 'left' ? spec.x : W / 2;
+    // Scrim band behind the micro line.
+    const padX = 14 * u, padY = 8 * u;
+    const bx = (spec.align === 'left' ? mx : mx - mw / 2) - padX;
+    const by = my - mSize / 2 - padY;
+    ctx.fillStyle = 'rgba(10,10,10,0.55)';
+    ctx.beginPath();
+    ctx.roundRect(bx, by, mw + 2 * padX, mSize + 2 * padY, 6 * u);
+    ctx.fill();
+    // Outline + fill, like the caption.
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3 * u;
+    ctx.strokeStyle = '#0a0a0a';
+    ctx.strokeText(microText, mx, my);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillText(microText, mx, my);
   }
   ctx.letterSpacing = '0px';
 }
@@ -314,36 +378,5 @@ export function renderDebug200(state) {
   return canvas;
 }
 
-// Generated demo panels (gradient sky + sun + skyline silhouette), so the app
-// never shows an empty grey rectangle. No photo, no Rockstar art.
-export function makeDemoPhoto(seed, w = 900, h = 1200) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const x = c.getContext('2d');
-  const hues = [
-    ['#ff7a2f', '#ff3d6e', '#2a0b3d'],
-    ['#00e5ff', '#ff2fd0', '#1b0b2e'],
-    ['#ffb02e', '#ff5a1e', '#7a0f1e'],
-    ['#8ef0c8', '#3ec6a7', '#1b2a4a'],
-  ];
-  const pal = hues[seed % hues.length];
-  const g = x.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, pal[0]); g.addColorStop(0.55, pal[1]); g.addColorStop(1, pal[2]);
-  x.fillStyle = g; x.fillRect(0, 0, w, h);
-  // Low sun, camera-left.
-  const sun = x.createRadialGradient(w * 0.22, h * 0.62, 0, w * 0.22, h * 0.62, w * 0.3);
-  sun.addColorStop(0, 'rgba(255,230,160,0.95)');
-  sun.addColorStop(0.4, 'rgba(255,180,90,0.5)');
-  sun.addColorStop(1, 'rgba(255,180,90,0)');
-  x.fillStyle = sun; x.fillRect(0, 0, w, h);
-  // Skyline silhouette.
-  x.fillStyle = 'rgba(12,6,20,0.85)';
-  let bx = 0;
-  const rnd = mulberry32(seed * 7919 + 13);
-  while (bx < w) {
-    const bw = 60 + rnd() * 130, bh = 120 + rnd() * 320;
-    x.fillRect(bx, h - bh, bw, bh);
-    bx += bw + 8 + rnd() * 30;
-  }
-  return c;
-}
+// No generated demo panels: every panel shows a real photo (the three samples
+// under app/samples/), so no screenshot can ever show a gradient placeholder.

@@ -1,24 +1,39 @@
 // Editor wiring: state, photo ingest, crop, ratio/layout/preset, export, debug 200px.
 // A `?shot=` query sets up a fixed scene for a screenshot instead (./shots.js).
-import { renderCover, renderDebug200, layoutRects, RATIOS, PRESETS, LAYOUTS, makeDemoPhoto } from './render.js';
+import { renderCover, renderDebug200, layoutRects, RATIOS, PRESETS, LAYOUTS } from './render.js';
 import { runShot } from './shots.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('cover');
 const status = $('status');
 
+// The three shipped sample photos (free to use): boulevard sunset, pier, sunset
+// beach. The demo state on load uses these three real photos — never a
+// generated gradient — so every screenshot shows real photos.
+const SAMPLE_NAMES = ['boulevard', 'pier', 'sunset'];
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
 const state = {
   ratio: '1:1',
   layout: 'straddle',
   preset: 'vice',
   caption: 'SUNSET HEIST',
-  kicker: 'VICE CITY',
+  kicker: 'PALM COAST',
   micro: 'A COVER MADE WITH SUNSET COVER MAKER',
   fontMode: 'auto', // auto | anton | archivo
   photos: [], // {img, name, demo}
   panels: [], // {photoIndex, scale, ox, oy} — one per layout slot, up to 4
   selected: 0,
   showSelection: false, // draw the selected panel's outline on the preview only
+  showCursor: false, // draw a drag cursor over the selected panel (crop shot)
 };
 
 function panelCount() {
@@ -30,10 +45,27 @@ function ensurePanels() {
   while (state.panels.length < n) state.panels.push({ photoIndex: -1, scale: 1, ox: 0, oy: 0 });
 }
 
-function demoState() {
+// Demo state: the three real sample photos, hero = boulevard sunset, lower
+// panels = pier + sunset beach. Pans are tuned for the default Straddle 1:1
+// (boulevard hero so her face stays in frame; pier so his face clears the
+// caption straddling the gutter). Loads async, then redraws.
+async function demoState() {
   ensurePanels();
-  state.photos = [0, 1, 2, 3].map((s) => ({ img: makeDemoPhoto(s), name: 'demo-' + (s + 1), demo: true }));
-  state.panels.forEach((p, i) => { p.photoIndex = i % 4; p.scale = 1; p.ox = 0; p.oy = 0; });
+  const loaded = [];
+  for (const n of SAMPLE_NAMES) {
+    try {
+      const img = await loadImage(`samples/${n}.jpg`);
+      loaded.push({ img, name: n, demo: false });
+    } catch (err) {
+      status.textContent = 'Could not load sample ' + n;
+    }
+  }
+  if (!loaded.length) return;
+  state.photos = loaded;
+  state.panels.forEach((p, i) => { p.photoIndex = i % loaded.length; p.scale = 1; p.ox = 0; p.oy = 0; });
+  state.panels[0].oy = 170;
+  state.panels[1].oy = 70;
+  redraw();
 }
 
 // The renderer's state: panels carry the resolved photo image.
@@ -65,17 +97,53 @@ function redraw() {
     canvas.width = out.width; canvas.height = out.height;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(out, 0, 0);
-    // Selected panel outline (preview only, never in the export).
+    // Selected panel outline + drag handles (preview only, never in the export).
+    // Handles make it obvious the panel can be dragged and resized.
     if (state.showSelection) {
       const rects = layoutRects(state.layout, canvas.width, canvas.height);
       const r = rects[state.selected];
       if (r) {
+        const u = canvas.width / 1080;
         ctx.strokeStyle = '#ff7a2f';
         ctx.lineWidth = 3;
         ctx.strokeRect(r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3);
+        const hs = 11 * u;
+        const hx = [r.x, r.x + r.w / 2, r.x + r.w];
+        const hy = [r.y, r.y + r.h / 2, r.y + r.h];
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#ff7a2f';
+        ctx.lineWidth = 2 * u;
+        for (const x of hx) for (const y of hy) {
+          ctx.beginPath();
+          ctx.rect(x - hs / 2, y - hs / 2, hs, hs);
+          ctx.fill();
+          ctx.stroke();
+        }
+        // Drag cursor over the selected panel (crop shot): a white arrow with
+        // a black outline, centred on the panel, so the shot reads as a drag.
+        if (state.showCursor) {
+          const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+          const s = 26 * u;
+          ctx.beginPath();
+          ctx.moveTo(cx - 0.5 * s, cy - 0.9 * s);
+          ctx.lineTo(cx - 0.5 * s, cy + 0.5 * s);
+          ctx.lineTo(cx - 0.1 * s, cy + 0.1 * s);
+          ctx.lineTo(cx + 0.15 * s, cy + 0.55 * s);
+          ctx.lineTo(cx + 0.45 * s, cy + 0.4 * s);
+          ctx.lineTo(cx + 0.2 * s, cy - 0.05 * s);
+          ctx.lineTo(cx + 0.7 * s, cy - 0.05 * s);
+          ctx.closePath();
+          ctx.fillStyle = '#ffffff';
+          ctx.strokeStyle = '#0a0a0a';
+          ctx.lineWidth = 3 * u;
+          ctx.lineJoin = 'round';
+          ctx.fill();
+          ctx.stroke();
+        }
       }
     }
     renderChips();
+    updateFloatCrop();
   });
 }
 
@@ -118,6 +186,37 @@ function renderChips() {
     $('zoom').value = String(sel.scale || 1);
   }
 }
+
+// Floating crop bar over the canvas (Zoom + Reset near the panel being edited).
+// Shown whenever a panel is selected, so the crop control sits next to the
+// canvas instead of buried in the left column.
+function updateFloatCrop() {
+  const bar = $('floatCrop');
+  const sel = state.panels[state.selected];
+  bar.hidden = !(state.showSelection && sel);
+  if (sel) {
+    $('floatCropName').textContent = String(state.selected + 1);
+    $('floatZoom').value = String(sel.scale || 1);
+  }
+}
+function setPanelScale(v) {
+  const p = state.panels[state.selected];
+  if (!p) return;
+  p.scale = Math.min(4, Math.max(1, v));
+  $('zoom').value = String(p.scale);
+  $('floatZoom').value = String(p.scale);
+  redraw();
+}
+function resetPanel() {
+  const p = state.panels[state.selected];
+  if (!p) return;
+  p.scale = 1; p.ox = 0; p.oy = 0;
+  $('zoom').value = '1';
+  $('floatZoom').value = '1';
+  redraw();
+}
+$('floatZoom').addEventListener('input', (e) => setPanelScale(parseFloat(e.target.value)));
+$('floatReset').addEventListener('click', resetPanel);
 
 function assignPhoto(i) {
   ensurePanels();
@@ -226,15 +325,9 @@ canvas.addEventListener('wheel', (e) => {
   redraw();
 }, { passive: false });
 $('zoom').addEventListener('input', (e) => {
-  state.panels[state.selected].scale = parseFloat(e.target.value);
-  redraw();
+  setPanelScale(parseFloat(e.target.value));
 });
-$('resetPanel').addEventListener('click', () => {
-  const p = state.panels[state.selected];
-  p.scale = 1; p.ox = 0; p.oy = 0;
-  $('zoom').value = '1';
-  redraw();
-});
+$('resetPanel').addEventListener('click', resetPanel);
 
 // Controls: ratio, layout, preset, text.
 $('ratioSeg').addEventListener('click', (e) => {
@@ -337,6 +430,5 @@ if (shot) {
     showSizes: () => { $('sizesStrip').hidden = false; },
   });
 } else {
-  demoState();
-  redraw();
+  demoState(); // loads the three real samples, then redraws
 }

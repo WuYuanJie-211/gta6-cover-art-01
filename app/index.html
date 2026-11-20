@@ -3,21 +3,92 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cover Snap</title>
+<title>Sunset Cover Maker — GTA-style cover art</title>
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
 <main class="app">
-  <section class="controls">
-    <h1>Cover Snap</h1>
-    <p>A photo and a caption, made into a square cover.</p>
-    <label>Photo <input id="photo" type="file" accept="image/*"></label>
-    <label>Caption <input id="caption" type="text" maxlength="40" value="Sunset Heist"></label>
-    <button id="export" type="button">Export PNG 1080 x 1080</button>
+  <section class="controls" aria-label="Editor controls">
+    <h1>Sunset Cover Maker</h1>
+    <p class="sub">Drop photos, type a caption, export a poster.</p>
+
+    <div class="group">
+      <span class="label">Size</span>
+      <div class="segmented" id="ratioSeg" role="group" aria-label="Aspect ratio">
+        <button type="button" data-ratio="1:1" class="on">1:1</button>
+        <button type="button" data-ratio="4:5">4:5</button>
+        <button type="button" data-ratio="16:9">16:9</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <span class="label">Layout</span>
+      <div class="layouts" id="layoutRow">
+        <button type="button" data-layout="straddle" class="on" title="Straddle — hero top, two below">
+          <span class="thumb t-straddle"></span>Straddle</button>
+        <button type="button" data-layout="triptych" title="Triptych — three vertical strips">
+          <span class="thumb t-triptych"></span>Triptych</button>
+        <button type="button" data-layout="band" title="Band — one full bleed, type in the black band">
+          <span class="thumb t-band"></span>Band</button>
+        <button type="button" data-layout="quad" title="Quad — 2 by 2, caption bottom-left">
+          <span class="thumb t-quad"></span>Quad</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <span class="label">Grade</span>
+      <div class="swatches" id="gradeRow">
+        <button type="button" data-preset="vice" class="on" title="Vice sunset"><span class="sw s-vice"></span>Vice</button>
+        <button type="button" data-preset="neon" title="Neon night"><span class="sw s-neon"></span>Neon</button>
+        <button type="button" data-preset="heat" title="Heat"><span class="sw s-heat"></span>Heat</button>
+        <button type="button" data-preset="mint" title="Mint dusk"><span class="sw s-mint"></span>Mint</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <label class="label" for="caption">Caption</label>
+      <input id="caption" type="text" maxlength="40" value="SUNSET HEIST" autocomplete="off">
+      <label class="label" for="kicker">Kicker</label>
+      <input id="kicker" type="text" maxlength="30" value="VICE CITY" autocomplete="off">
+      <label class="label" for="micro">Micro line</label>
+      <input id="micro" type="text" maxlength="40" value="A COVER MADE WITH SUNSET COVER MAKER" autocomplete="off">
+      <label class="check"><input id="oneWord" type="checkbox"> One-word title (Archivo Black)</label>
+    </div>
+
+    <div class="group">
+      <span class="label">Photos</span>
+      <div class="photos" id="photoStrip"></div>
+      <label class="drop" id="dropLabel">Drop photos here or <input id="photo" type="file" accept="image/*" multiple> choose files</label>
+      <p class="hint">Click a panel to select it, drag to pan, scroll to zoom, or use the slider below.</p>
+      <div class="crop" id="cropBox" hidden>
+        <span class="label">Selected panel <b id="cropName">1</b></span>
+        <label>Zoom <input id="zoom" type="range" min="1" max="4" step="0.05" value="1"></label>
+        <button id="resetPanel" type="button">Reset panel</button>
+      </div>
+    </div>
+
+    <button id="debug200" type="button" class="ghost">Preview at 200px (D)</button>
     <p id="status" role="status"></p>
   </section>
-  <canvas id="cover" width="1080" height="1080" aria-label="The cover"></canvas>
+
+  <section class="stage" id="stage">
+    <div class="canvasWrap" id="canvasWrap">
+      <canvas id="cover" width="1080" height="1080" aria-label="Live cover preview"></canvas>
+      <div class="debug" id="debugBox" hidden>
+        <span>200px check — this is what the judge sees</span>
+        <canvas id="debugCanvas" width="200" height="200"></canvas>
+        <button id="debugClose" type="button">Close</button>
+      </div>
+    </div>
+    <div class="sizes" id="sizesStrip" hidden></div>
+  </section>
 </main>
+<footer class="exportbar">
+  <span class="label">Export</span>
+  <button id="exp11" type="button">PNG 1080 × 1080</button>
+  <button id="exp45" type="button">PNG 1080 × 1350</button>
+  <button id="exp169" type="button">PNG 1920 × 1080</button>
+</footer>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
